@@ -2,10 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Save the Date</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -14,24 +11,17 @@
     <div class="scene">
       <div class="card-wrap" id="cardWrap">
         <div class="card" id="card">
+
           <section class="face front">
-            <div class="content">
-              <p class="eyebrow">Save the Date</p>
-              <h1>Andy & Ashley</h1>
-              <p class="date">October 17, 2026</p>
-              <p class="hint">Swipe to flip →</p>
-            </div>
+            <!-- Front image changes based on rotation history -->
+            <img class="card-img" id="frontImg" src="" alt="" draggable="false" />
           </section>
 
           <section class="face back">
-            <div class="content">
-              <p class="eyebrow">We’re getting married</p>
-              <h2>Houston, Texas</h2>
-              <p class="details">Formal invitation to follow</p>
-              <p class="details">Wedding website coming soon!</p>
-              <p class="hint">← Swipe back</p>
-            </div>
+            <!-- Back image is always the same -->
+            <img class="card-img" id="backImg" src="" alt="" draggable="false" />
           </section>
+
         </div>
       </div>
     </div>

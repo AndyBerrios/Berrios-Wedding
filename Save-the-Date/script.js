@@ -1,236 +1,269 @@
-const card = document.getElementById("card");
-const cardWrap = document.getElementById("cardWrap");
+// =============================================================
+//  IMAGE CONFIGURATION
+//  Replace the placeholder URLs with your actual image paths.
+//  e.g. "images/front-1.jpg"  or a full URL from Canva export.
+// =============================================================
 
-// -----------------------------
-// State
-// -----------------------------
-let rotationY = 0;      // current card rotation in degrees
-let velocityY = 0;      // rotational velocity
+const FRONT_IMAGES = [
+  "images/front-1.jpg",   // shown first (index 0)
+];
+
+const BACK_IMAGE = "images/back.jpg";
+
+// =============================================================
+//  Setup
+// =============================================================
+
+const card     = document.getElementById("card");
+const frontImg = document.getElementById("frontImg");
+const backImg  = document.getElementById("backImg");
+
+// Load the fixed back image once
+backImg.src = BACK_IMAGE;
+
+// Track which front image is currently shown
+let frontIndex = 0;
+frontImg.src = FRONT_IMAGES[frontIndex];
+
+// How many full clockwise 360s have been completed (can be negative for CCW)
+let cumulativeTurns = 0;
+
+function setFrontImage(newIndex) {
+  if (newIndex === frontIndex) return;
+  frontIndex = newIndex;
+
+  // Brief opacity dip for a smooth swap feel
+  frontImg.classList.add("swap");
+  setTimeout(() => {
+    frontImg.src = FRONT_IMAGES[frontIndex];
+    frontImg.classList.remove("swap");
+  }, 120);
+}
+
+// =============================================================
+//  Physics State
+// =============================================================
+
+let rotationY   = 0;      // current card Y rotation in degrees
+let velocityY   = 0;      // degrees per frame
 let pointerDown = false;
-let animationFrame = null;
+let animFrame   = null;
 
-let lastX = 0;
+let lastX    = 0;
 let lastTime = 0;
+let samples  = [];        // recent {x, time} for flick detection
 
-// For flick velocity sampling
-let samples = [];
+// Tuning
+const DRAG_SENSITIVITY = 0.55;   // px → degrees while dragging
+const FLICK_MULTIPLIER = 22;     // flick px/ms → degrees/frame spin
+const FRICTION         = 0.275;  // momentum decay (higher = glides longer)
+const SNAP_STRENGTH    = 0.09;   // pull toward nearest face when slow
+const SNAP_THRESHOLD   = 1.8;    // velocity below this triggers snap pull
+const STOP_THRESHOLD   = 0.04;   // velocity below this → hard stop
+const TILT_MAX         = 12;     // max X tilt during drag (degrees)
 
-// Tuning values
-const DRAG_SENSITIVITY = 0.65;   // px to degrees while dragging
-const FLICK_MULTIPLIER = 18;     // how much swipe speed turns into spin
-const FRICTION = 0.965;          // lower = stops faster
-const MIN_VELOCITY = 0.08;       // stop threshold
-const TILT_MAX = 10;             // visual X tilt while dragging
-const SNAP_SPEED = 0.12;         // how aggressively it settles at the end
+// =============================================================
+//  Helpers
+// =============================================================
 
-// -----------------------------
-// Helpers
-// -----------------------------
-function setTransform(tiltX = 0) {
+function applyTransform(tiltX = 0) {
   card.style.transform = `rotateX(${tiltX}deg) rotateY(${rotationY}deg)`;
 }
 
-function normalizeAngle(angle) {
-  let a = angle % 360;
-  if (a < 0) a += 360;
-  return a;
+// Returns the nearest "face" angle (multiple of 180) to the current rotation
+function nearestFaceAngle(angle) {
+  return Math.round(angle / 180) * 180;
 }
 
-function shortestAngleDiff(from, to) {
-  let diff = (to - from + 540) % 360 - 180;
-  return diff;
+// True when card is showing the front (rotationY near an even multiple of 360)
+function isFrontVisible() {
+  const n = ((rotationY % 360) + 360) % 360;
+  return n < 90 || n >= 270;
 }
 
-function getNearestFaceAngle(angle) {
-  const normalized = normalizeAngle(angle);
-  const candidates = [0, 180, 360];
-  let nearest = candidates[0];
-  let bestDiff = Infinity;
-
-  for (const candidate of candidates) {
-    const diff = Math.abs(shortestAngleDiff(normalized, candidate));
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      nearest = candidate;
-    }
-  }
-
-  // Return target in the same "rotation neighborhood"
-  const baseTurns = Math.round(angle / 360) * 360;
-  const options = [baseTurns, baseTurns + 180, baseTurns - 180, baseTurns + 360];
-  let best = options[0];
-  let min = Infinity;
-
-  for (const option of options) {
-    const diff = Math.abs(option - angle);
-    if (diff < min) {
-      min = diff;
-      best = option;
-    }
-  }
-
-  // Snap to nearest face among local 0/180 multiples
-  const faceCandidates = [
-    Math.round(angle / 360) * 360,
-    Math.round((angle - 180) / 360) * 360 + 180
-  ];
-
-  let bestFace = faceCandidates[0];
-  let bestFaceDiff = Infinity;
-
-  for (const c of faceCandidates) {
-    const diff = Math.abs(c - angle);
-    if (diff < bestFaceDiff) {
-      bestFaceDiff = diff;
-      bestFace = c;
-    }
-  }
-
-  return bestFace;
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function stopAnimation() {
-  if (animationFrame) {
-    cancelAnimationFrame(animationFrame);
-    animationFrame = null;
+function stopAnim() {
+  if (animFrame) {
+    cancelAnimationFrame(animFrame);
+    animFrame = null;
   }
 }
 
 function pushSample(x, time) {
   samples.push({ x, time });
-
-  // Keep only recent motion samples
-  const cutoff = time - 120;
-  samples = samples.filter((s) => s.time >= cutoff);
+  const cutoff = time - 100;
+  samples = samples.filter(s => s.time >= cutoff);
 }
 
-function getFlickVelocity() {
+function flickVelocity() {
   if (samples.length < 2) return 0;
-
   const first = samples[0];
-  const last = samples[samples.length - 1];
-  const dx = last.x - first.x;
-  const dt = last.time - first.time;
-
+  const last  = samples[samples.length - 1];
+  const dt    = last.time - first.time;
   if (dt <= 0) return 0;
-  return dx / dt; // px per ms
+  return (last.x - first.x) / dt; // px/ms
 }
 
-function animateInertia() {
-  stopAnimation();
-
-  function frame() {
-    if (pointerDown) return;
-
-    rotationY += velocityY;
-
-    // natural slowing
-    velocityY *= FRICTION;
-
-    // once it's slow, gently settle to front/back
-    if (Math.abs(velocityY) < 1.2) {
-      const target = getNearestFaceAngle(rotationY);
-      const diff = target - rotationY;
-      velocityY += diff * SNAP_SPEED;
-    }
-
-    setTransform(0);
-
-    if (Math.abs(velocityY) > MIN_VELOCITY) {
-      animationFrame = requestAnimationFrame(frame);
-    } else {
-      // final snap
-      rotationY = getNearestFaceAngle(rotationY);
-      velocityY = 0;
-      setTransform(0);
-      stopAnimation();
-    }
-  }
-
-  animationFrame = requestAnimationFrame(frame);
+function getClientX(e) {
+  if (e.touches?.length)        return e.touches[0].clientX;
+  if (e.changedTouches?.length) return e.changedTouches[0].clientX;
+  return e.clientX;
 }
 
-function getClientX(event) {
-  if (event.touches && event.touches.length > 0) {
-    return event.touches[0].clientX;
+// =============================================================
+//  Turn tracking — updates front image index
+// =============================================================
+
+// We track how many half-turns (180° crossings) have been made in each
+// direction.  A full CW 360 = +2 half-turns; a full CCW 360 = -2 half-turns.
+// Whenever the cumulative half-turns reach a new even number (full revolution),
+// we advance or retreat the front image index.
+
+let halfTurnCount = 0;           // net count of 180° crossings
+let lastHalfTurnAngle = 0;       // last angle at which we registered a crossing
+
+function checkTurnProgress() {
+  // Number of half-turns completed from origin
+  const newHalfTurns = Math.round(rotationY / 180);
+
+  if (newHalfTurns === halfTurnCount) return;
+
+  const delta = newHalfTurns - halfTurnCount;
+  halfTurnCount = newHalfTurns;
+
+  // A full revolution = 2 half-turns.  Every 2 CW half-turns → next image.
+  // Every 2 CCW half-turns → previous image.
+  // We use the cumulative half-turn count parity to determine when a full
+  // revolution has completed and landed back on the FRONT face.
+
+  // Only change image when landing on a front face (even multiple of 360)
+  const fullTurns = Math.floor(newHalfTurns / 2);
+  if (fullTurns !== cumulativeTurns) {
+    const direction = fullTurns > cumulativeTurns ? 1 : -1;
+    cumulativeTurns = fullTurns;
+
+    const count = FRONT_IMAGES.length;
+    const newIndex = ((frontIndex + direction) % count + count) % count;
+    setFrontImage(newIndex);
   }
-  if (event.changedTouches && event.changedTouches.length > 0) {
-    return event.changedTouches[0].clientX;
-  }
-  return event.clientX;
 }
 
-// -----------------------------
-// Pointer / touch events
-// -----------------------------
-function startDrag(event) {
+// =============================================================
+//  Drag Handlers
+// =============================================================
+
+function onStart(e) {
   pointerDown = true;
-  stopAnimation();
+  stopAnim();
 
   const now = performance.now();
-  lastX = getClientX(event);
+  lastX    = getClientX(e);
   lastTime = now;
-  samples = [{ x: lastX, time: now }];
+  samples  = [{ x: lastX, time: now }];
 
-  if (card.setPointerCapture && event.pointerId !== undefined) {
-    card.setPointerCapture(event.pointerId);
+  if (card.setPointerCapture && e.pointerId != null) {
+    card.setPointerCapture(e.pointerId);
   }
 }
 
-function moveDrag(event) {
+function onMove(e) {
   if (!pointerDown) return;
+  e.preventDefault();
 
-  const x = getClientX(event);
+  const x   = getClientX(e);
   const now = performance.now();
-  const dx = x - lastX;
-  const dt = now - lastTime || 1;
+  const dx  = x - lastX;
+  const dt  = (now - lastTime) || 1;
 
-  // update rotation based on drag
   rotationY += dx * DRAG_SENSITIVITY;
+  checkTurnProgress();
 
-  // temporary tilt based on drag speed
-  const tiltX = clamp(-(dx / dt) * 6, -TILT_MAX, TILT_MAX);
-  setTransform(tiltX);
+  // Subtle X tilt based on drag speed
+  const tiltX = clamp(-(dx / dt) * 5, -TILT_MAX, TILT_MAX);
+  applyTransform(tiltX);
 
-  lastX = x;
+  lastX    = x;
   lastTime = now;
   pushSample(x, now);
-
-  // prevent page interaction while dragging
-  event.preventDefault();
 }
 
-function endDrag(event) {
+function onEnd() {
   if (!pointerDown) return;
   pointerDown = false;
 
-  const flickVelocity = getFlickVelocity(); // px/ms
-  velocityY = flickVelocity * FLICK_MULTIPLIER;
+  const fv = flickVelocity();          // px/ms
+  velocityY = fv * FLICK_MULTIPLIER;
 
-  // tiny flicks should still feel nice
-  if (Math.abs(velocityY) < 0.6) {
-    const target = getNearestFaceAngle(rotationY);
-    velocityY = (target - rotationY) * 0.08;
+  // Tiny flick — ease gently to nearest face
+  if (Math.abs(velocityY) < 0.8) {
+    const target = nearestFaceAngle(rotationY);
+    velocityY = (target - rotationY) * 0.1;
   }
 
   animateInertia();
 }
 
-// Pointer events
-card.addEventListener("pointerdown", startDrag);
-window.addEventListener("pointermove", moveDrag, { passive: false });
-window.addEventListener("pointerup", endDrag);
-window.addEventListener("pointercancel", endDrag);
+// =============================================================
+//  Inertia Animation
+// =============================================================
 
-// Touch fallback
-card.addEventListener("touchstart", startDrag, { passive: true });
-window.addEventListener("touchmove", moveDrag, { passive: false });
-window.addEventListener("touchend", endDrag);
-window.addEventListener("touchcancel", endDrag);
+function animateInertia() {
+  stopAnim();
+
+  function frame() {
+    if (pointerDown) return;
+
+    rotationY += velocityY;
+    velocityY *= FRICTION;
+
+    checkTurnProgress();
+
+    // When slow enough, begin snapping to nearest face
+    if (Math.abs(velocityY) < SNAP_THRESHOLD) {
+      const target = nearestFaceAngle(rotationY);
+      const diff   = target - rotationY;
+      velocityY   += diff * SNAP_STRENGTH;
+
+      // Critically damp once very close to avoid oscillation
+      if (Math.abs(diff) < 0.5 && Math.abs(velocityY) < 0.15) {
+        rotationY = target;
+        velocityY = 0;
+        applyTransform(0);
+        return; // done
+      }
+    }
+
+    applyTransform(0);
+
+    if (Math.abs(velocityY) > STOP_THRESHOLD) {
+      animFrame = requestAnimationFrame(frame);
+    } else {
+      rotationY = nearestFaceAngle(rotationY);
+      velocityY = 0;
+      applyTransform(0);
+    }
+  }
+
+  animFrame = requestAnimationFrame(frame);
+}
+
+// =============================================================
+//  Event Listeners
+// =============================================================
+
+card.addEventListener("pointerdown",  onStart);
+window.addEventListener("pointermove",  onMove,  { passive: false });
+window.addEventListener("pointerup",    onEnd);
+window.addEventListener("pointercancel", onEnd);
+
+// Touch fallback (iOS Safari)
+card.addEventListener("touchstart", onStart, { passive: true });
+window.addEventListener("touchmove",  onMove,  { passive: false });
+window.addEventListener("touchend",   onEnd);
+window.addEventListener("touchcancel", onEnd);
 
 // Initial render
-setTransform(0);
+applyTransform(0);
