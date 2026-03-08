@@ -5,7 +5,7 @@
 // =============================================================
 
 const FRONT_IMAGES = [
-  "images/front-1.jpg",   // shown first (index 0)
+  "images/front-1.JPG",   // shown first (index 0)
 ];
 
 const BACK_IMAGE = "images/back.jpg";
