@@ -267,3 +267,69 @@ window.addEventListener("touchcancel", onEnd);
 
 // Initial render
 applyTransform(0);
+
+
+
+// =============================================================
+//  Idle Hint — gently swivels the card so users know to swipe
+// =============================================================
+
+const HINT_DELAY    = 2200;   // ms before first hint plays
+const HINT_INTERVAL = 6000;   // ms between repeated hints
+const HINT_PEAK     = 38;     // how far (degrees) the card rocks
+const HINT_DURATION = 900;    // ms for one full hint swing
+
+let hintTimeout  = null;
+let hintRAF      = null;
+let hintPlayed   = false;     // becomes true after first interaction
+
+function cancelHint() {
+  clearTimeout(hintTimeout);
+  cancelAnimationFrame(hintRAF);
+}
+
+function playHint() {
+  // Don't interfere with a real drag or momentum animation
+  if (pointerDown || Math.abs(velocityY) > 0.5) return;
+
+  const startAngle = rotationY;
+  const start      = performance.now();
+
+  function hintFrame(now) {
+    if (pointerDown) return;                // user grabbed it mid-hint
+
+    const t  = Math.min((now - start) / HINT_DURATION, 1);
+    // Ease-in-out sine wave: rock forward then back to rest
+    const wave = Math.sin(t * Math.PI) * Math.sin(t * Math.PI * 2);
+    rotationY  = startAngle + wave * HINT_PEAK;
+    applyTransform(0);
+
+    if (t < 1) {
+      hintRAF = requestAnimationFrame(hintFrame);
+    } else {
+      rotationY = startAngle;
+      applyTransform(0);
+      scheduleHint();      // queue the next nudge
+    }
+  }
+
+  hintRAF = requestAnimationFrame(hintFrame);
+}
+
+function scheduleHint() {
+  cancelHint();
+  hintTimeout = setTimeout(playHint, HINT_INTERVAL);
+}
+
+// Cancel hint permanently once the user has interacted
+function onUserInteract() {
+  if (hintPlayed) return;
+  hintPlayed = true;
+  cancelHint();
+}
+
+card.addEventListener("pointerdown",  onUserInteract, { once: true });
+card.addEventListener("touchstart",   onUserInteract, { once: true });
+
+// Kick off the first hint after a short delay
+hintTimeout = setTimeout(playHint, HINT_DELAY);
