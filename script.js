@@ -275,7 +275,7 @@ applyTransform(0);
 // =============================================================
 
 const HINT_DELAY    = 2200;   // ms before first hint plays
-const HINT_INTERVAL = 6000;   // ms between repeated hints
+const HINT_INTERVAL = 5000;   // ms between repeated hints
 const HINT_PEAK     = 38;     // how far (degrees) the card rocks
 const HINT_DURATION = 900;    // ms for one full hint swing
 
