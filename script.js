@@ -333,3 +333,41 @@ card.addEventListener("touchstart",   onUserInteract, { once: true });
 
 // Kick off the first hint after a short delay
 hintTimeout = setTimeout(playHint, HINT_DELAY);
+
+
+
+// =============================================================
+//  Swipe Label — bilingual nudge shown until first interaction
+// =============================================================
+
+const swipeLabel = document.createElement("div");
+swipeLabel.innerHTML = `
+  <span style="display:block;font-size:13px;letter-spacing:0.08em;opacity:0.85;">Swipe to flip &nbsp;·&nbsp; Desliza para voltear</span>
+`;
+Object.assign(swipeLabel.style, {
+  position:      "fixed",
+  bottom:        "max(28px, env(safe-area-inset-bottom, 28px))",
+  left:          "50%",
+  transform:     "translateX(-50%)",
+  textAlign:     "center",
+  color:         "#fff",
+  fontFamily:    "Georgia, 'Times New Roman', serif",
+  fontStyle:     "italic",
+  lineHeight:    "1.4",
+  pointerEvents: "none",
+  opacity:       "0",
+  transition:    "opacity 0.6s ease",
+  zIndex:        "100",
+  textShadow:    "0 1px 6px rgba(0,0,0,0.35)",
+  whiteSpace:    "nowrap",
+});
+document.body.appendChild(swipeLabel);
+
+setTimeout(() => { swipeLabel.style.opacity = "1"; }, 800);
+
+function dismissLabel() {
+  swipeLabel.style.opacity = "0";
+  setTimeout(() => swipeLabel.remove(), 700);
+}
+card.addEventListener("pointerdown", dismissLabel, { once: true });
+card.addEventListener("touchstart",  dismissLabel, { once: true });
